@@ -36,7 +36,7 @@ $ sudo ./sniffer.py
     ip_source           : X.X.X.X
     tcp_ack_n           : 12345
     tcp_dest_port       : 80
-    tcp_flags           : {'ack': 1, 'syn': 0, ...}
+    tcp_flags           : ack=1 ... syn=0 ...
     tcp_seq_n           : 67890
     tcp_source_port     : 1234
     tcp_win_sz          : 229
