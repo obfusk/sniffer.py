@@ -36,13 +36,13 @@ Examples
     eth_dest_mac        : ...
     eth_q_tag           : None
     eth_source_mac      : ...
-    eth_type            : 2048
-    ip_PROTO            : 6
-    ip_TTL              : 64
+    eth_type            : 2048 (0x800)
+    ip_PROTO            : 6 (0x6)
+    ip_TTL              : 64 (0x40)
     ip_dest             : ...
     ip_source           : ...
     tcp_ack_n           : ...
-    tcp_dest_port       : 80
+    tcp_dest_port       : 80 (0x50)
     tcp_flags           : ack=1 ... syn=0 ...
     tcp_seq_n           : ...
     tcp_source_port     : ...
@@ -154,6 +154,8 @@ def print_packet(t, data, src, protos, parsed_data):            # {{{1
                "_data _offset _opts _pkt".split())):
       if isinstance(v, dict):
         v = " ".join("{}={}".format(*x) for x in sorted(v.items()))
+      elif isinstance(v, int):
+        v = "{0} (0x{0:X})".format(v)
       print("    {:20}: {}".format(k,v))
   print("  raw:")
   for x in grouper(data, 16):

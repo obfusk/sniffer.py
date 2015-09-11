@@ -29,17 +29,17 @@ $ sudo ./sniffer.py
     eth_dest_mac        : XXXXXXXXXXXX
     eth_q_tag           : None
     eth_source_mac      : XXXXXXXXXXXX
-    eth_type            : 2048
-    ip_PROTO            : 6
-    ip_TTL              : 64
+    eth_type            : 2048 (0x800)
+    ip_PROTO            : 6 (0x6)
+    ip_TTL              : 64 (0x40)
     ip_dest             : 213.108.108.143
     ip_source           : X.X.X.X
-    tcp_ack_n           : 12345
-    tcp_dest_port       : 80
+    tcp_ack_n           : 12345 (0x3039)
+    tcp_dest_port       : 80 (50)
     tcp_flags           : ack=1 ... syn=0 ...
-    tcp_seq_n           : 67890
-    tcp_source_port     : 1234
-    tcp_win_sz          : 229
+    tcp_seq_n           : 67890 (0x10932)
+    tcp_source_port     : 1234 (0x4d2)
+    tcp_win_sz          : 229 (0xe5)
   raw:
     XX XX XX XX XX XX XX XX XX XX XX XX 08 00 45 00  XXXXXXXXXXXX..E.
     00 7d 02 07 40 00 40 06 1a cf XX XX XX XX XX XX  .}..@.@...XXXXXX
