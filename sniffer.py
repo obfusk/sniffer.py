@@ -13,15 +13,45 @@
 # --                                                            ; }}}1
 
                                                                 # {{{1
-"""
+r"""
 Python (2+3) network sniffer
 
 Examples
 --------
 
->>> import sniffer as S
+>>> import sniffer as S, subprocess, time
 
-... TODO ...
+>>> c1 = [sys.executable, "sniffer.py"]           # sniffer
+>>> c2 = "curl -s obfusk.ch".split()              # curl
+>>> p1 = subprocess.Popen(c1, stdout = subprocess.PIPE)
+>>> time.sleep(1)
+>>> p2 = subprocess.Popen(c2, stdout = subprocess.PIPE)
+>>> time.sleep(1)
+>>> p1.terminate()
+>>> o  = S.b2s(p1.stdout.read()).split('\n\n')    # sniffer output
+>>> g  = [ x for x in o if "GET" in x and "obfusk" in x ][0] # the GET
+>>> print(g)                                      # doctest: +ELLIPSIS
+1... | eth... | eth >> IP >> TCP:
+  parsed:
+    eth_dest_mac        : ...
+    eth_q_tag           : None
+    eth_source_mac      : ...
+    eth_type            : 2048
+    ip_PROTO            : 6
+    ip_TTL              : 64
+    ip_dest             : ...
+    ip_source           : ...
+    tcp_ack_n           : ...
+    tcp_dest_port       : 80
+    tcp_flags           : {...}
+    tcp_seq_n           : ...
+    tcp_source_port     : ...
+    tcp_win_sz          : ...
+  raw:
+    ......47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 ...GET / HTTP/1.1
+    0d 0a 48 6f 73 74 3a 20 6f 62 66 75 73 6b 2e 63  ..Host: obfusk.c
+    68 0d 0a 55 73 65 72 2d 41 67 65 6e 74 3a 20 63  h..User-Agent: c
+    75 72 6c 2f .................................... url/...
 """
                                                                 # }}}1
 
