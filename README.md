@@ -5,7 +5,7 @@
     Date        : 2015-09-13
 
     Copyright   : Copyright (C) 2015  Felix C. Stegerman
-    Version     : v0.0.1
+    Version     : v0.1.0
 
 []: }}}1
 
@@ -24,22 +24,32 @@ See `sniffer.py` for the code (with examples).
 ```
 $ sudo ./sniffer.py --filter '"TCP" in protos and "obfusk" in tcp_data'
 ...
-[ 1441933466 | eth0 | protos: eth >> IP >> TCP ]:
+[ 1441933466 | eth0 | protos: eth >> IP >> TCP >> HTTP ]:
   parsed:
-    eth_source_mac      : XXXXXXXXXXXX
-    eth_dest_mac        : XXXXXXXXXXXX
-    eth_q_tag           : None
-    eth_type            : 2048 (0x800)
-    ip_source           : X.X.X.X
-    ip_dest             : 213.108.108.143
-    ip_PROTO            : 6 (0x6)
-    ip_TTL              : 64 (0x40)
-    tcp_source_port     : 1234 (0x4d2)
-    tcp_dest_port       : 80 (50)
-    tcp_seq_n           : 67890 (0x10932)
-    tcp_ack_n           : 12345 (0x3039)
-    tcp_flags           : ack=1 ... syn=0 ...
-    tcp_win_sz          : 229 (0xe5)
+    eth_source_mac          : XXXXXXXXXXXX
+    eth_dest_mac            : XXXXXXXXXXXX
+    eth_q_tag               : None
+    eth_type                : 2048 (0x800)
+    ip_source               : X.X.X.X
+    ip_dest                 : 213.108.108.143
+    ip_PROTO                : 6 (0x6)
+    ip_TTL                  : 64 (0x40)
+    tcp_source_port         : 1234 (0x4d2)
+    tcp_dest_port           : 80 (50)
+    tcp_seq_n               : 67890 (0x10932)
+    tcp_ack_n               : 12345 (0x3039)
+    tcp_flags               : ack=1 ... syn=0 ...
+    tcp_win_sz              : 229 (0xe5)
+    http_subtype            : HTTP_REQUEST
+    http_request_line       : GET / HTTP/1.1
+    http_request_method     : GET
+    http_request_uri        : /
+    http_request_version    : HTTP/1.1
+    http_headers            :
+      accept                    : */*
+      host                      : obfusk.ch
+      user-agent                : curl/7.44.0
+    http_body               : ''
   raw:
     XX XX XX XX XX XX XX XX XX XX XX XX 08 00 45 00  XXXXXXXXXXXX..E.
     00 7d 02 07 40 00 40 06 1a cf XX XX XX XX XX XX  .}..@.@...XXXXXX
@@ -57,8 +67,9 @@ $ sudo ./sniffer.py --filter '"TCP" in protos and "obfusk" in tcp_data'
 
 ## TODO
 
-* more parsers (HTTP, DNS, ...)!
+* more parsers (DNS, ...)!
 * prettier printing?!
+* privilege dropping?!
 * ...
 
 ## License

@@ -7,7 +7,7 @@
 # Date        : 2015-09-13
 #
 # Copyright   : Copyright (C) 2015  Felix C. Stegerman
-# Version     : v0.0.1
+# Version     : v0.1.0
 # License     : GPLv3+
 #
 # --                                                            ; }}}1
@@ -35,22 +35,32 @@ HTTP GET
 >>> o  = S.b2s(p1.stdout.read()).split('\n\n')    # sniffer output
 >>> g  = [ x for x in o if "GET" in x and "obfusk" in x ][0] # the GET
 >>> print(g)                                      # doctest: +ELLIPSIS
-[ ... | eth... | protos: eth >> IP >> TCP ]:
+[ ... | eth... | protos: eth >> IP >> TCP >> HTTP ]:
   parsed:
-    eth_source_mac      : ...
-    eth_dest_mac        : ...
-    eth_q_tag           : None
-    eth_type            : 2048 (0x800)
-    ip_source           : ...
-    ip_dest             : ...
-    ip_PROTO            : 6 (0x6)
-    ip_TTL              : 64 (0x40)
-    tcp_source_port     : ...
-    tcp_dest_port       : 80 (0x50)
-    tcp_seq_n           : ...
-    tcp_ack_n           : ...
-    tcp_flags           : ack=1 ... syn=0 ...
-    tcp_win_sz          : ...
+    eth_source_mac          : ...
+    eth_dest_mac            : ...
+    eth_q_tag               : None
+    eth_type                : 2048 (0x800)
+    ip_source               : ...
+    ip_dest                 : ...
+    ip_PROTO                : 6 (0x6)
+    ip_TTL                  : 64 (0x40)
+    tcp_source_port         : ...
+    tcp_dest_port           : 80 (0x50)
+    tcp_seq_n               : ...
+    tcp_ack_n               : ...
+    tcp_flags               : ack=1 ... syn=0 ...
+    tcp_win_sz              : ...
+    http_subtype            : HTTP_REQUEST
+    http_request_line       : GET / HTTP/1.1
+    http_request_method     : GET
+    http_request_uri        : /
+    http_request_version    : HTTP/1.1
+    http_headers            :
+      accept                    : */*
+      host                      : obfusk.ch
+      user-agent                : ...
+    http_body               : ...
   raw:
     ......47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 ...GET / HTTP/1.1
     0d 0a 48 6f 73 74 3a 20 6f 62 66 75 73 6b 2e 63  ..Host: obfusk.c
@@ -64,8 +74,8 @@ HTTP GET
 
 from __future__ import print_function
 
-import argparse, binascii, functools, itertools, os, select, struct
-import sys, time
+import argparse, binascii, functools, itertools, os, re, select
+import struct, sys, time
 import socket as S
 
 if sys.version_info.major == 2:                                 # {{{1
@@ -90,7 +100,7 @@ else:
   xrange = range; izip_longest = zip_longest
                                                                 # }}}1
 
-__version__         = "0.0.1"
+__version__         = "0.1.0"
 
 DEFAULT_GROUP_SIZE  = 16
 
@@ -185,16 +195,27 @@ def print_packet(t, data, src, parsed_data,                     # {{{1
   if not group_size: group_size = DEFAULT_GROUP_SIZE
   iface, _type, _, _, _mac  = src
   protos                    = " >> ".join(parsed_data["protos"])
+  uc                        = lambda x: uncontrolled(x, '?')
   print("[ {} | {} | protos: {} ]:".format(t, iface, protos))
   print("  parsed:")
   for k, v in sorted(parsed_data.items(), key = packet_info_sorter):
     if k != "protos" and not any(map(lambda x: k.endswith(x),
                                      HIDDEN_PACKET_INFO)):
       if isinstance(v, dict):
-        v = " ".join("{}={}".format(*x) for x in sorted(v.items()))
+        if k.endswith("_flags"):
+          v = " ".join("{}={}".format(*x) for x in sorted(v.items()))
+        else:
+          print(" "*4+"{:24}:".format(k))
+          for hk, hv in sorted(v.items()):
+            print(" "*6+"{:26}: {}".format(uc(hk), uc(ellipsise(hv))))
+          continue
       elif isinstance(v, int):
         v = "{0} (0x{0:X})".format(v)
-      print("    {:20}: {}".format(k,v))
+      elif k.endswith("_body"):
+        v = repr(ellipsise(v))
+      elif not isinstance(v, str):
+        v = repr(v)
+      print(" "*4+"{:24}: {}".format(k, uc(v)))
   print("  raw:")
   for x in grouper(data, group_size):
     y = list(ords(itertools.takewhile(lambda c: c is not None, x)))
@@ -262,6 +283,57 @@ PARSERS               = {}
 SORT_FIRST            = []
 SORT_PROTOCOLS        = []
 SUBTYPES              = {}
+
+# === HTTP 1.0/1.1 (over TCP)====================================== #
+
+@subtype_identifier("HTTP", "HTTP_REQUEST")
+def is_http_request(tcp_data):
+  """is HTTP_REQUEST?"""
+  return re.match(HTTP_REQUEST, tcp_data["tcp_data"])
+
+@subtype_identifier("HTTP", "HTTP_RESPONSE")
+def is_http_response(tcp_data):
+  """is HTTP_RESPONSE?"""
+  return re.match(HTTP_RESPONSE, tcp_data["tcp_data"])
+
+@parser("TCP", "HTTP", "request_line    request_method  ",
+                       "request_uri     request_version ",
+                       "response_line   response_version",
+                       "response_status response_reason ",
+                       "headers body")
+def unpack_http(pkt):                                           # {{{1
+  """unpack HTTP packet from TCP packet"""
+
+  d = unpack_tcp(pkt); s = d["tcp_data"]
+  m = is_http_request(d) or is_http_response(d)
+  if not m: return None
+  status_line = m.groupdict(); s = s[m.end():]; headers = dict()
+  while s:
+    h, s = s.split(b"\r\n", 1)                                  # TODO
+    if h == b"": break
+    k, v = h.split(b":", 1); headers[k.lower()] = v.strip()
+  pre = "request" if "method" in status_line else "response"
+  for k, v in status_line.items():
+    d["http_"+pre+"_"+k] = b2s(v.strip())
+  d["http_"+pre+"_line"] = b2s(m.group(1))
+  d.update(http_headers = headers, http_body = s)
+  return d
+                                                                # }}}1
+
+def is_http(tcp_data):
+  """is HTTP packet?"""
+  return tcp_data is not None and (is_http_request(tcp_data) or
+                                   is_http_response(tcp_data))
+
+HTTP_REQUEST  = re.compile(br"\A ( (?P<method>  [A-Z]+      ) [ ]"
+                           br"     (?P<uri>     \S+         ) [ ]"
+                           br"     (?P<version> HTTP/1.[01] ) ) \r\n",
+                           re.M|re.X)
+
+HTTP_RESPONSE = re.compile(br"\A ( (?P<version> HTTP/1.[01] ) [ ]"
+                           br"     (?P<status>  \d+         ) [ ]"
+                           br"     (?P<reason>  .+          ) ) \r\n",
+                           re.M|re.X)
 
 # === ICMP ======================================================== #
 # type (8)       | code (8)       | checksum (16)                   #
@@ -737,11 +809,16 @@ ICMP_ERROR_SYMBOLS = {
   ICMP_PROT_UNREACH   : "P",
 }
 
+def ellipsise(x, max_l = 40):
+  """ellipsise too long strings/bytes"""
+  ell = b"..." if isinstance(x, bytes) else "..."
+  return x[:max_l] + ell if len(x) > max_l else x
+
 def ords(s):
   """string (or sequence of chars/ints) as list of ints"""
   return map(lambda c: c if isinstance(c, int) else ord(c), s)
 
-def uncontrolled(s):                                            # {{{1
+def uncontrolled(s, to = '.'):                                  # {{{1
   r"""
   string w/ control chars as dots
 
@@ -750,7 +827,7 @@ def uncontrolled(s):                                            # {{{1
   '. ..foo.bar.'
   """
 
-  return "".join(chr(c) if 31 < c < 127 else '.' for c in ords(s))
+  return "".join(chr(c) if 31 < c < 127 else to for c in ords(s))
                                                                 # }}}1
 
 # from https://docs.python.org/2/library/itertools.html
