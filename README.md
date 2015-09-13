@@ -2,7 +2,7 @@
 
     File        : README.md
     Maintainer  : Felix C. Stegerman <flx@obfusk.net>
-    Date        : 2015-09-12
+    Date        : 2015-09-13
 
     Copyright   : Copyright (C) 2015  Felix C. Stegerman
     Version     : v0.0.1
@@ -22,7 +22,7 @@ See `sniffer.py` for the code (with examples).
 []: {{{1
 
 ```
-$ sudo ./sniffer.py
+$ sudo ./sniffer.py --filter '"TCP" in protos and "obfusk" in tcp_data'
 ...
 1441933466 | eth >> IP >> TCP | from ('eth0', ...) :
   parsed:

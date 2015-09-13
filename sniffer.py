@@ -4,7 +4,7 @@
 #
 # File        : sniffer.py
 # Maintainer  : Felix C. Stegerman <flx@obfusk.net>
-# Date        : 2015-09-12
+# Date        : 2015-09-13
 #
 # Copyright   : Copyright (C) 2015  Felix C. Stegerman
 # Version     : v0.0.1
@@ -17,6 +17,10 @@ r"""
 Python (2+3) network sniffer
 
 Examples
+========
+
+
+HTTP GET
 --------
 
 >>> import sniffer as S, subprocess, time
@@ -52,12 +56,16 @@ Examples
     0d 0a 48 6f 73 74 3a 20 6f 62 66 75 73 6b 2e 63  ..Host: obfusk.c
     68 0d 0a 55 73 65 72 2d 41 67 65 6e 74 3a 20 63  h..User-Agent: c
     75 72 6c 2f .................................... url/...
+
+
+... TODO ...
 """
                                                                 # }}}1
 
 from __future__ import print_function
 
-import argparse, binascii, os, select, struct, sys, time
+import argparse, binascii, functools, itertools, os, select, struct
+import sys, time
 import socket as S
 
 if sys.version_info.major == 2:                                 # {{{1
@@ -67,7 +75,7 @@ if sys.version_info.major == 2:                                 # {{{1
   def s2b(x):
     """convert str to bytes"""
     return x
-  from itertools import izip_longest, takewhile
+  from itertools import izip_longest
 else:
   def b2s(x):
     """convert bytes to str"""
@@ -78,12 +86,13 @@ else:
     if isinstance(x, bytes): return x
     return x.encode("utf8")
   from functools import reduce
-  from itertools import zip_longest, takewhile
+  from itertools import zip_longest
   xrange = range; izip_longest = zip_longest
                                                                 # }}}1
 
-__version__       = "0.0.1"
+__version__         = "0.0.1"
 
+DEFAULT_GROUP_SIZE  = 16
 
 def main(*args):                                                # {{{1
   p = argument_parser(); n = p.parse_args(args)
@@ -92,7 +101,7 @@ def main(*args):                                                # {{{1
     doctest.testmod(verbose = n.verbose)
     return 0
   try:
-    sniffer()
+    sniffer(n.filter, n.bytes)
   except KeyboardInterrupt:
     return 1
   return 0
@@ -100,16 +109,23 @@ def main(*args):                                                # {{{1
 
 def argument_parser():                                          # {{{1
   p = argparse.ArgumentParser(description = "network sniffer")
+  p.add_argument("--filter", "-f",
+                 help = "expression to filter packets; "
+                        "NB: passed to eval() !!!")
+  p.add_argument("--bytes", "-b", type = int,
+                 help = "bytes per row for hex dump "
+                        "(default: %(default)s)")
   p.add_argument("--version", action = "version",
                  version = "%(prog)s {}".format(__version__))
   p.add_argument("--test", action = "store_true",
                  help = "run tests (and not the sniffer)")
   p.add_argument("--verbose", "-v", action = "store_true",
                  help = "run tests verbosely")
+  p.set_defaults(bytes = DEFAULT_GROUP_SIZE)
   return p
                                                                 # }}}1
 
-def sniffer():                                                  # {{{1
+def sniffer(filter_expr = None, group_size = None):             # {{{1
   """sniff & print"""
 
   sock = S.socket(S.AF_PACKET, S.SOCK_RAW, S.ntohs(0x0003))     # TODO
@@ -118,75 +134,101 @@ def sniffer():                                                  # {{{1
       rs, _, _ = select.select([sock], [], [])
       if sock in rs:
         data, src = sock.recvfrom(65565)
-        print_packet(time.time(), data, src, *unpack_packet(data))
+        parsed_data = unpack_packet(data)
+        if not filter_expr or eval_filter_expr(filter_expr,
+                                               parsed_data.copy()):
+          print_packet(time.time(), data, src, parsed_data,
+                       group_size)
   finally:
     sock.close()
                                                                 # }}}1
 
-def unpack_packet(data):                                        # {{{1
+# TODO
+def eval_filter_expr(expr, data):
+  """eval()s expr with data as locals and minimal globals"""
+  b = {}
+  for k in "bin chr hex len oct ord".split(): b[k] = __builtins__[k]
+  return eval(expr, dict(__builtins__ = b), data)
+
+def unpack_packet(data, proto = "eth"):                         # {{{1
   """unpack & parse packet"""
 
-  eth_data = unpack_eth(data)
-  if is_ip(eth_data):
-    ip_data = unpack_ip(eth_data["eth_data"])
-    if ip_data is not None:
-      for proto, f in PARSERS["IP"]:
-        data = f(ip_data)
-        if data is not None:
-          data.update(eth_data)
-          return "IP >> " + proto, data
-      return "IP >> UNKNOWN", ip_data
-    else:
-      return "IP (PARSE FAILED)", eth_data
-  else:
-    return "RAW", eth_data
+  p = PARSERS[proto]
+  if "identifier" in p and not p["identifier"](data): return None
+  p_data = p["parser"](data)
+  for cp in p.get("children", []):
+    cp_data = unpack_packet(p_data, cp)
+    if cp_data is not None: return cp_data
+  return p_data
                                                                 # }}}1
 
-def print_packet(t, data, src, protos, parsed_data):            # {{{1
+def print_packet(t, data, src, parsed_data,                     # {{{1
+                 group_size = None):
   """(pretty)print packet"""
 
-  iface, _type, _, _, _mac = src
-  print("{} | {} | eth >> {}:".format(t, iface, protos))
+  if not group_size: group_size = DEFAULT_GROUP_SIZE
+  iface, _type, _, _, _mac  = src
+  protos                    = " >> ".join(parsed_data["protos"])
+  print("{} | {} | {}:".format(t, iface, protos))
   print("  parsed:")
   for k, v in sorted(parsed_data.items(), key = packet_info_sorter):
-    if not any(map(lambda x: k.endswith(x),
-               "_data _offset _opts _pkt".split())):
+    if k != "protos" and not any(map(lambda x: k.endswith(x),
+                                     HIDDEN_PACKET_INFO)):
       if isinstance(v, dict):
         v = " ".join("{}={}".format(*x) for x in sorted(v.items()))
       elif isinstance(v, int):
         v = "{0} (0x{0:X})".format(v)
       print("    {:20}: {}".format(k,v))
   print("  raw:")
-  for x in grouper(data, 16):
-    y = list(ords(takewhile(lambda c: c is not None, x)))
+  for x in grouper(data, group_size):
+    y = list(ords(itertools.takewhile(lambda c: c is not None, x)))
     print("    ", end = "")
     for c in y: print(b2s("%02x" % c), end = " ")
-    print((16 - len(y)) * "   " + " " + uncontrolled(y))
+    print((group_size - len(y)) * "   " + " " + uncontrolled(y))
   print()
                                                                 # }}}1
 
 def packet_info_sorter(x):
   """sort packet info by protocol and importance"""
   f     = lambda l, k, d: l.index(k) if k in l else d
-  k, _  = x; pre = k[:k.index("_")]
+  k, _  = x; pre = k[:k.index("_")] if "_" in k else ""
   return (f(SORT_PROTOCOLS, pre , float("inf")),
           f(SORT_FIRST    , k   , float("inf")), k)
 
-def parser(parent_proto, proto):
+def parser(parent_proto, proto, *sort_first):                   # {{{1
   """decorator that adds an unpack_* parser to PARSERS"""
-  def f(g):
-    PARSERS.setdefault(parent_proto, []).append((proto, g))
-    return g
-  return f
 
+  ppl, pl = [ x.lower() for x in [parent_proto, proto] ]
+  def parser_(f):
+    @functools.wraps(f)
+    def wrapper(*a, **kw):
+      x = f(*a, **kw)
+      if x is not None:
+        protos = x.setdefault("protos", [])
+        if proto not in protos: protos.append(proto)
+      return x
+    PARSERS.setdefault(proto, {})["parser"] = wrapper
+    PARSERS.setdefault(parent_proto, {}) \
+      .setdefault("children", set()).add(proto)
+    SORT_FIRST.extend([ pl + "_" + x  for y in sort_first
+                                      for x in y.split() ])
+    if ppl not in SORT_PROTOCOLS: SORT_PROTOCOLS.insert(0, ppl)
+    if pl  not in SORT_PROTOCOLS: SORT_PROTOCOLS.append(pl)
+    return wrapper
+  return parser_
+                                                                # }}}1
+
+def identifier(parent_proto, proto):
+  """decorator that adds an is_* identifier to PARSERS"""
+  def identifier_(f):
+    PARSERS.setdefault(proto, {})["identifier"] = f
+    return f
+  return identifier_
+
+HIDDEN_PACKET_INFO    = "_data _offset _opts _pkt".split()
 PARSERS               = {}
-SORT_PROTOCOLS        = "eth ip icmp udp tcp".split()
-SORT_FIRST            = ("eth_source_mac eth_dest_mac "
-                         "ip_source ip_dest "
-                         "icmp_TYPE icmp_CODE "
-                         "udp_source_port udp_dest_port "
-                         "tcp_source_port tcp_dest_port "
-                         "tcp_seq_n tcp_ack_n").split()
+SORT_FIRST            = []
+SORT_PROTOCOLS        = []
 
 # === ICMP ======================================================== #
 # type (8)       | code (8)       | checksum (16)                   #
@@ -237,7 +279,7 @@ def is_icmp_dest_unreach(icmp_data):
   """is ICMP_DEST_UNREACH?"""
   return icmp_data["icmp_TYPE"] == ICMP_DEST_UNREACH
 
-@parser("IP", "ICMP")
+@parser("IP", "ICMP", "TYPE CODE")
 def unpack_icmp(pkt):                                           # {{{1
   """unpack ICMP packet from IP packet"""
 
@@ -245,8 +287,8 @@ def unpack_icmp(pkt):                                           # {{{1
   if not is_icmp(d): return None
   o = d["ip_data_offset"]; icmp_hdr, icmp_data = pkt[o:o+8], pkt[o+8:]
   TYPE, code, _, ID, seq = struct.unpack("!BBHHH", icmp_hdr)
-  d.update(icmp_TYPE = TYPE, icmp_CODE = code, icmp_ID = ID,
-           icmp_seq = seq, icmp_data = icmp_data)
+  d.update(icmp_TYPE  = TYPE, icmp_CODE = code, icmp_ID = ID,
+           icmp_seq   = seq , icmp_data = icmp_data)
   return d
                                                                 # }}}1
 
@@ -260,7 +302,7 @@ def is_icmp(ip_data):
 #                           ... data ...                            #
 # ================================================================= #
 
-@parser("IP", "UDP")
+@parser("IP", "UDP", "source_port dest_port")
 def unpack_udp(pkt):                                            # {{{1
   """unpack UDP packet from IP packet"""
 
@@ -268,8 +310,8 @@ def unpack_udp(pkt):                                            # {{{1
   if not is_udp(d): return None
   o = d["ip_data_offset"]; udp_hdr, udp_data = pkt[o:o+8], pkt[o+8:]
   s_port, d_port, _, _ = struct.unpack("!HHHH", udp_hdr)
-  d.update(udp_source_port = s_port, udp_dest_port = d_port,
-           udp_data = udp_data)
+  d.update(udp_source_port  = s_port, udp_dest_port = d_port,
+           udp_data         = udp_data)
   return d
                                                                 # }}}1
 
@@ -294,7 +336,7 @@ def is_udp(ip_data):
 # | CWR   | ECE   | URG   | ACK   | PSH   | RST   | SYN   | FIN   | #
 # ================================================================= #
 
-@parser("IP", "TCP")
+@parser("IP", "TCP", "source_port dest_port seq_n ack_n")
 def unpack_tcp(pkt):                                            # {{{1
                                                                 # {{{2
   r"""
@@ -448,19 +490,25 @@ def pseudo_ipv4_header(s_ip, d_ip, length, proto):              # {{{1
 # ================================================================= #
 
 # TODO
-@parser("eth", "IP")
+@parser("eth", "IP", "source dest")
 def unpack_ip(pkt):                                             # {{{1
   """unpack IP packet"""
 
-  if isinstance(pkt, dict): return pkt
+  d = {}
+  if isinstance(pkt, dict):
+    if "IP" in pkt["protos"]: return pkt
+    else: d, pkt = pkt, pkt["eth_data"]
   ihl, ttl, proto = b2i(pkt[0]) & 0xf, b2i(pkt[8]), b2i(pkt[9])
   if ihl != 5: return None    # ignore IPv4 w/ options -- TODO
   s_ip  , d_ip    = pkt[12:16], pkt[16:20]
   s_ip_a, d_ip_a  = map(S.inet_ntoa, [s_ip, d_ip])
-  return dict(ip_TTL = ttl, ip_PROTO = proto, ip_data_offset = 4*ihl,
-              ip_source = s_ip_a, ip_dest = d_ip_a, ip_pkt = pkt)
+  d.update (ip_TTL          = ttl   , ip_PROTO  = proto,
+            ip_source       = s_ip_a, ip_dest   = d_ip_a,
+            ip_data_offset  = 4*ihl , ip_pkt    = pkt)
+  return d
                                                                 # }}}1
 
+@identifier("eth", "IP")
 def is_ip(eth_data):
   """is IP packet?"""
   return eth_data is not None and eth_data["eth_type"] == ETH_IP
@@ -497,6 +545,7 @@ def internet_checksum(data):                                    # {{{1
 #                               ...                                 #
 # ================================================================= #
 
+@parser("__root__", "eth", "source_mac dest_mac")
 def unpack_eth(data):                                           # {{{1
   """unpack Ethernet packet"""
 
@@ -513,9 +562,9 @@ def unpack_eth(data):                                           # {{{1
   f = lambda x, y: x << 8 | y
   d_mac, s_mac  = [ b2s(binascii.hexlify(i2b(reduce(f, x, 0))))
                     for x in [dest_mac, source_mac] ]
-  return dict(eth_dest_mac = d_mac, eth_source_mac = s_mac,
-              eth_type = eth_type, eth_q_tag = q_tag,
-              eth_data = payload)
+  return dict(eth_dest_mac  = d_mac   , eth_source_mac  = s_mac,
+              eth_type      = eth_type, eth_q_tag       = q_tag,
+              eth_data      = payload)
                                                                 # }}}1
 
 ETH_QTAG              = 0x8100
