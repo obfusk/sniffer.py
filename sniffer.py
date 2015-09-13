@@ -4,7 +4,7 @@
 #
 # File        : sniffer.py
 # Maintainer  : Felix C. Stegerman <flx@obfusk.net>
-# Date        : 2015-09-10
+# Date        : 2015-09-12
 #
 # Copyright   : Copyright (C) 2015  Felix C. Stegerman
 # Version     : v0.0.1
@@ -33,19 +33,19 @@ Examples
 >>> print(g)                                      # doctest: +ELLIPSIS
 1... | eth... | eth >> IP >> TCP:
   parsed:
+    eth_source_mac      : ...
     eth_dest_mac        : ...
     eth_q_tag           : None
-    eth_source_mac      : ...
     eth_type            : 2048 (0x800)
+    ip_source           : ...
+    ip_dest             : ...
     ip_PROTO            : 6 (0x6)
     ip_TTL              : 64 (0x40)
-    ip_dest             : ...
-    ip_source           : ...
-    tcp_ack_n           : ...
-    tcp_dest_port       : 80 (0x50)
-    tcp_flags           : ack=1 ... syn=0 ...
-    tcp_seq_n           : ...
     tcp_source_port     : ...
+    tcp_dest_port       : 80 (0x50)
+    tcp_seq_n           : ...
+    tcp_ack_n           : ...
+    tcp_flags           : ack=1 ... syn=0 ...
     tcp_win_sz          : ...
   raw:
     ......47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 ...GET / HTTP/1.1
@@ -130,11 +130,11 @@ def unpack_packet(data):                                        # {{{1
   if is_ip(eth_data):
     ip_data = unpack_ip(eth_data["eth_data"])
     if ip_data is not None:
-      for f, t in PARSERS:
+      for proto, f in PARSERS["IP"]:
         data = f(ip_data)
         if data is not None:
           data.update(eth_data)
-          return "IP >> " + t, data
+          return "IP >> " + proto, data
       return "IP >> UNKNOWN", ip_data
     else:
       return "IP (PARSE FAILED)", eth_data
@@ -148,7 +148,7 @@ def print_packet(t, data, src, protos, parsed_data):            # {{{1
   iface, _type, _, _, _mac = src
   print("{} | {} | eth >> {}:".format(t, iface, protos))
   print("  parsed:")
-  for k, v in sorted(parsed_data.items()):
+  for k, v in sorted(parsed_data.items(), key = packet_info_sorter):
     if not any(map(lambda x: k.endswith(x),
                "_data _offset _opts _pkt".split())):
       if isinstance(v, dict):
@@ -164,6 +164,29 @@ def print_packet(t, data, src, protos, parsed_data):            # {{{1
     print((16 - len(y)) * "   " + " " + uncontrolled(y))
   print()
                                                                 # }}}1
+
+def packet_info_sorter(x):
+  """sort packet info by protocol and importance"""
+  f     = lambda l, k, d: l.index(k) if k in l else d
+  k, _  = x; pre = k[:k.index("_")]
+  return (f(SORT_PROTOCOLS, pre , float("inf")),
+          f(SORT_FIRST    , k   , float("inf")), k)
+
+def parser(parent_proto, proto):
+  """decorator that adds an unpack_* parser to PARSERS"""
+  def f(g):
+    PARSERS.setdefault(parent_proto, []).append((proto, g))
+    return g
+  return f
+
+PARSERS               = {}
+SORT_PROTOCOLS        = "eth ip icmp udp tcp".split()
+SORT_FIRST            = ("eth_source_mac eth_dest_mac "
+                         "ip_source ip_dest "
+                         "icmp_TYPE icmp_CODE "
+                         "udp_source_port udp_dest_port "
+                         "tcp_source_port tcp_dest_port "
+                         "tcp_seq_n tcp_ack_n").split()
 
 # === ICMP ======================================================== #
 # type (8)       | code (8)       | checksum (16)                   #
@@ -214,6 +237,7 @@ def is_icmp_dest_unreach(icmp_data):
   """is ICMP_DEST_UNREACH?"""
   return icmp_data["icmp_TYPE"] == ICMP_DEST_UNREACH
 
+@parser("IP", "ICMP")
 def unpack_icmp(pkt):                                           # {{{1
   """unpack ICMP packet from IP packet"""
 
@@ -236,6 +260,7 @@ def is_icmp(ip_data):
 #                           ... data ...                            #
 # ================================================================= #
 
+@parser("IP", "UDP")
 def unpack_udp(pkt):                                            # {{{1
   """unpack UDP packet from IP packet"""
 
@@ -269,6 +294,7 @@ def is_udp(ip_data):
 # | CWR   | ECE   | URG   | ACK   | PSH   | RST   | SYN   | FIN   | #
 # ================================================================= #
 
+@parser("IP", "TCP")
 def unpack_tcp(pkt):                                            # {{{1
                                                                 # {{{2
   r"""
@@ -422,6 +448,7 @@ def pseudo_ipv4_header(s_ip, d_ip, length, proto):              # {{{1
 # ================================================================= #
 
 # TODO
+@parser("eth", "IP")
 def unpack_ip(pkt):                                             # {{{1
   """unpack IP packet"""
 
@@ -552,10 +579,8 @@ ICMP_ERROR_SYMBOLS = {
   ICMP_PROT_UNREACH   : "P",
 }
 
-PARSERS = [(unpack_icmp, "ICMP"), (unpack_udp, "UDP"),
-           (unpack_tcp, "TCP")]
-
 def ords(s):
+  """string (or sequence of chars/ints) as list of ints"""
   return map(lambda c: c if isinstance(c, int) else ord(c), s)
 
 def uncontrolled(s):                                            # {{{1
@@ -572,6 +597,7 @@ def uncontrolled(s):                                            # {{{1
 
 # from https://docs.python.org/2/library/itertools.html
 def grouper(it, n, fill = None):
+  """iterate in groups of n"""
   return izip_longest(fillvalue = fill, *([iter(it)]*n))
 
 def b2i(x):

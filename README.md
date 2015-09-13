@@ -26,19 +26,19 @@ $ sudo ./sniffer.py
 ...
 1441933466 | eth >> IP >> TCP | from ('eth0', ...) :
   parsed:
+    eth_source_mac      : XXXXXXXXXXXX
     eth_dest_mac        : XXXXXXXXXXXX
     eth_q_tag           : None
-    eth_source_mac      : XXXXXXXXXXXX
     eth_type            : 2048 (0x800)
+    ip_source           : X.X.X.X
+    ip_dest             : 213.108.108.143
     ip_PROTO            : 6 (0x6)
     ip_TTL              : 64 (0x40)
-    ip_dest             : 213.108.108.143
-    ip_source           : X.X.X.X
-    tcp_ack_n           : 12345 (0x3039)
-    tcp_dest_port       : 80 (50)
-    tcp_flags           : ack=1 ... syn=0 ...
-    tcp_seq_n           : 67890 (0x10932)
     tcp_source_port     : 1234 (0x4d2)
+    tcp_dest_port       : 80 (50)
+    tcp_seq_n           : 67890 (0x10932)
+    tcp_ack_n           : 12345 (0x3039)
+    tcp_flags           : ack=1 ... syn=0 ...
     tcp_win_sz          : 229 (0xe5)
   raw:
     XX XX XX XX XX XX XX XX XX XX XX XX 08 00 45 00  XXXXXXXXXXXX..E.
