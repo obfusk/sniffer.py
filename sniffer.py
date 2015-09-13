@@ -196,7 +196,7 @@ def print_packet(t, data, src, parsed_data,                     # {{{1
   iface, _type, _, _, _mac  = src
   protos                    = " >> ".join(parsed_data["protos"])
   uc                        = lambda x: uncontrolled(x, '?')
-  print("[ {} | {} | protos: {} ]:".format(t, iface, protos))
+  print("[ {} | {} | protos: {} ]:".format(round(t), iface, protos))
   print("  parsed:")
   for k, v in sorted(parsed_data.items(), key = packet_info_sorter):
     if k != "protos" and not any(map(lambda x: k.endswith(x),
