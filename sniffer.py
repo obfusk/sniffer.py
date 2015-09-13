@@ -8,7 +8,7 @@
 #
 # Copyright   : Copyright (C) 2015  Felix C. Stegerman
 # Version     : v0.0.1
-# License     : LGPLv3+
+# License     : GPLv3+
 #
 # --                                                            ; }}}1
 
@@ -106,7 +106,6 @@ def argument_parser():                                          # {{{1
                  help = "run tests (and not the sniffer)")
   p.add_argument("--verbose", "-v", action = "store_true",
                  help = "run tests verbosely")
-  p.set_defaults(test = False, verbose = False)
   return p
                                                                 # }}}1
 

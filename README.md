@@ -2,7 +2,7 @@
 
     File        : README.md
     Maintainer  : Felix C. Stegerman <flx@obfusk.net>
-    Date        : 2015-09-10
+    Date        : 2015-09-12
 
     Copyright   : Copyright (C) 2015  Felix C. Stegerman
     Version     : v0.0.1
@@ -64,11 +64,11 @@ $ sudo ./sniffer.py
 
 ## License
 
-LGPLv3+ [1].
+GPLv3+ [1].
 
 ## References
 
-[1] GNU Lesser General Public License, version 3
---- https://www.gnu.org/licenses/lgpl-3.0.html
+[1] GNU General Public License, version 3
+--- https://www.gnu.org/licenses/gpl-3.0.html
 
 []: ! ( vim: set tw=70 sw=2 sts=2 et fdm=marker : )
