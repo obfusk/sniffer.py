@@ -24,7 +24,7 @@ See `sniffer.py` for the code (with examples).
 ```
 $ sudo ./sniffer.py --filter '"TCP" in protos and "obfusk" in tcp_data'
 ...
-1441933466 | eth >> IP >> TCP | from ('eth0', ...) :
+[ 1441933466 | eth0 | protos: eth >> IP >> TCP ]:
   parsed:
     eth_source_mac      : XXXXXXXXXXXX
     eth_dest_mac        : XXXXXXXXXXXX
@@ -57,8 +57,7 @@ $ sudo ./sniffer.py --filter '"TCP" in protos and "obfusk" in tcp_data'
 
 ## TODO
 
-* (use) more parsers!
-* options (like filtering)?!
+* more parsers (HTTP, DNS, ...)!
 * prettier printing?!
 * ...
 

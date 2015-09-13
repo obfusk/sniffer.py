@@ -35,7 +35,7 @@ HTTP GET
 >>> o  = S.b2s(p1.stdout.read()).split('\n\n')    # sniffer output
 >>> g  = [ x for x in o if "GET" in x and "obfusk" in x ][0] # the GET
 >>> print(g)                                      # doctest: +ELLIPSIS
-1... | eth... | eth >> IP >> TCP:
+[ ... | eth... | protos: eth >> IP >> TCP ]:
   parsed:
     eth_source_mac      : ...
     eth_dest_mac        : ...
@@ -147,7 +147,8 @@ def sniffer(filter_expr = None, group_size = None):             # {{{1
 def eval_filter_expr(expr, data):
   """eval()s expr with data as locals and minimal globals"""
   b = {}
-  for k in "bin chr hex len oct ord".split(): b[k] = __builtins__[k]
+  for k in "bin chr hex len oct ord".split():
+    b[k] = getattr(__builtins__, k)
   return eval(expr, dict(__builtins__ = b), data)
 
 def unpack_packet(data, proto = "eth"):                         # {{{1
@@ -156,10 +157,25 @@ def unpack_packet(data, proto = "eth"):                         # {{{1
   p = PARSERS[proto]
   if "identifier" in p and not p["identifier"](data): return None
   p_data = p["parser"](data)
+  if p_data is None: return None
+  add_subtype_info(proto, p_data)
   for cp in p.get("children", []):
     cp_data = unpack_packet(p_data, cp)
     if cp_data is not None: return cp_data
   return p_data
+                                                                # }}}1
+
+def add_subtype_info(proto, p_data):                            # {{{1
+  """add subtype info to p_data (if any)"""
+
+  if proto in SUBTYPES:
+    info = "???"                                                # TODO
+    for st, f in SUBTYPES[proto].get("identifiers", {}).items():
+      if f(p_data):
+        info = st; break
+    if "informer" in SUBTYPES[proto]:
+      info = SUBTYPES[proto]["informer"](st, p_data)
+    p_data[proto.lower() + "_subtype"] = info
                                                                 # }}}1
 
 def print_packet(t, data, src, parsed_data,                     # {{{1
@@ -169,7 +185,7 @@ def print_packet(t, data, src, parsed_data,                     # {{{1
   if not group_size: group_size = DEFAULT_GROUP_SIZE
   iface, _type, _, _, _mac  = src
   protos                    = " >> ".join(parsed_data["protos"])
-  print("{} | {} | {}:".format(t, iface, protos))
+  print("[ {} | {} | protos: {} ]:".format(t, iface, protos))
   print("  parsed:")
   for k, v in sorted(parsed_data.items(), key = packet_info_sorter):
     if k != "protos" and not any(map(lambda x: k.endswith(x),
@@ -192,8 +208,9 @@ def packet_info_sorter(x):
   """sort packet info by protocol and importance"""
   f     = lambda l, k, d: l.index(k) if k in l else d
   k, _  = x; pre = k[:k.index("_")] if "_" in k else ""
-  return (f(SORT_PROTOCOLS, pre , float("inf")),
-          f(SORT_FIRST    , k   , float("inf")), k)
+  i_pre = f(SORT_PROTOCOLS, pre , float("inf"))
+  i_fst = f(SORT_FIRST    , k   , float("inf"))
+  return (i_pre, -1 if k.endswith("_subtype") else i_fst, k)
 
 def parser(parent_proto, proto, *sort_first):                   # {{{1
   """decorator that adds an unpack_* parser to PARSERS"""
@@ -225,10 +242,26 @@ def identifier(parent_proto, proto):
     return f
   return identifier_
 
+def subtype_identifier(proto, subtype):
+  """decorator that adds is_*_* subtype identifier to SUBTYPES"""
+  def identifier(f):
+    SUBTYPES.setdefault(proto, {}) \
+      .setdefault("identifiers", {})[subtype] = f
+    return f
+  return identifier
+
+def subtype_informer(proto):
+  """decorator that adds show_*_subtype subtype informer to SUBTYPES"""
+  def informer(f):
+    SUBTYPES.setdefault(proto, {})["informer"] = f
+    return f
+  return informer
+
 HIDDEN_PACKET_INFO    = "_data _offset _opts _pkt".split()
 PARSERS               = {}
 SORT_FIRST            = []
 SORT_PROTOCOLS        = []
+SUBTYPES              = {}
 
 # === ICMP ======================================================== #
 # type (8)       | code (8)       | checksum (16)                   #
@@ -249,35 +282,50 @@ SORT_PROTOCOLS        = []
 #       IP header + first 8 bytes of original datagram's data       #
 # ================================================================= #
 
+@subtype_identifier("ICMP", "ICMP_ECHO")
 def is_icmp_echo(icmp_data):
   """is ICMP_ECHO?"""
   return  dict(icmp_TYPE = icmp_data["icmp_TYPE"],
                icmp_CODE = icmp_data["icmp_CODE"]) \
             == ICMP_ECHO
 
+@subtype_identifier("ICMP", "ICMP_ECHOREPLY")
 def is_icmp_echoreply(icmp_data):
   """is ICMP_ECHOREPLY?"""
   return  dict(icmp_TYPE = icmp_data["icmp_TYPE"],
                icmp_CODE = icmp_data["icmp_CODE"]) \
             == ICMP_ECHOREPLY
 
+@subtype_identifier("ICMP", "ICMP_EXC_TTL")
 def is_icmp_exc_ttl(icmp_data):
   """is ICMP_EXC_TTL?"""
   return  is_icmp_time_exceeded(icmp_data) and \
             icmp_data["icmp_CODE"] == ICMP_EXC_TTL
 
+@subtype_identifier("ICMP", "ICMP_TIME_EXCEEDED")
 def is_icmp_time_exceeded(icmp_data):
   """is ICMP_TIME_EXCEEDED?"""
   return icmp_data["icmp_TYPE"] == ICMP_TIME_EXCEEDED
 
+@subtype_identifier("ICMP", "ICMP_PORT_UNREACH")
 def is_icmp_port_unreach(icmp_data):
   """is ICMP_PORT_UNREACH?"""
   return  is_icmp_dest_unreach(icmp_data) and \
             icmp_data["icmp_CODE"] == ICMP_PORT_UNREACH
 
+@subtype_identifier("ICMP", "ICMP_DEST_UNREACH")
 def is_icmp_dest_unreach(icmp_data):
   """is ICMP_DEST_UNREACH?"""
   return icmp_data["icmp_TYPE"] == ICMP_DEST_UNREACH
+
+@subtype_informer("ICMP")
+def show_icmp_subtype(subtype, icmp_data):
+  """show info about ICMP packet"""
+  if is_icmp_exc_ttl(icmp_data) or is_icmp_dest_unreach(icmp_data):
+    c = ICMP_TIME_EXCEEDED_CODES if is_icmp_exc_ttl(p) else \
+        ICMP_DEST_UNREACHABLE_CODES
+    return subtype + ": " + c[icmp_data["CODE"]]
+  return subtype
 
 @parser("IP", "ICMP", "TYPE CODE")
 def unpack_icmp(pkt):                                           # {{{1
@@ -367,11 +415,11 @@ def unpack_tcp(pkt):                                            # {{{1
   for i, flag in enumerate(reversed(TCP_FLAGS)):
     flags[flag.lower()] = (offset_and_flags >> i) & 0b1
   tcp_opts, tcp_data = pkt[o+20:o+offset*4], pkt[o+offset*4:]
-  d.update(tcp_source_port  = s_port  , tcp_dest_port = d_port,
-           tcp_seq_n        = seq_n   , tcp_ack_n     = ack_n,
-           tcp_offset       = offset  , tcp_flags     = flags,
+  d.update(tcp_source_port  = s_port  , tcp_dest_port = d_port  ,
+           tcp_seq_n        = seq_n   , tcp_ack_n     = ack_n   ,
+           tcp_offset       = offset  , tcp_flags     = flags   ,
            tcp_win_sz       = win_sz  , tcp_opts      = tcp_opts,
-           tcp_data         = tcp_data)
+           tcp_data         = tcp_data                          )
   return d
                                                                 # }}}1
 
@@ -502,16 +550,16 @@ def unpack_ip(pkt):                                             # {{{1
   if ihl != 5: return None    # ignore IPv4 w/ options -- TODO
   s_ip  , d_ip    = pkt[12:16], pkt[16:20]
   s_ip_a, d_ip_a  = map(S.inet_ntoa, [s_ip, d_ip])
-  d.update (ip_TTL          = ttl   , ip_PROTO  = proto,
-            ip_source       = s_ip_a, ip_dest   = d_ip_a,
-            ip_data_offset  = 4*ihl , ip_pkt    = pkt)
+  d.update(ip_TTL         = ttl   , ip_PROTO  = proto ,
+           ip_source      = s_ip_a, ip_dest   = d_ip_a,
+           ip_data_offset = 4*ihl , ip_pkt    = pkt   )
   return d
                                                                 # }}}1
 
 @identifier("eth", "IP")
 def is_ip(eth_data):
   """is IP packet?"""
-  return eth_data is not None and eth_data["eth_type"] == ETH_IP
+  return eth_data is not None and eth_data["eth_type"] == ETH_IPv4
 
 def internet_checksum(data):                                    # {{{1
   """
@@ -537,6 +585,55 @@ def internet_checksum(data):                                    # {{{1
   return ~csum & 0xffff
                                                                 # }}}1
 
+# === ARP (IPv4) ================================================== #
+# HTYPE (16)                      | PTYPE (16)                      #
+# HLEN (8)        | PLEN (8)      | OPER (16)                       #
+# SHA #1 (16)                     | SHA #2 (16)                     #
+# SHA #3 (16)                     | SPA #1 (16)                     #
+# SPA #2 (16)                     | THA #1 (16)                     #
+# THA #2 (16)                     | THA #3 (16)                     #
+# TPA #1 (16)                     | TPA #2 (16)                     #
+# ================================================================= #
+
+@subtype_identifier("ARP", "ARP_REQUEST")
+def is_arp_request(arp_data):
+  """is ARP_REQUEST?"""
+  return arp_data["arp_opcode"] == ARP_REQUEST
+
+@subtype_identifier("ARP", "ARP_REPLY")
+def is_arp_reply(arp_data):
+  """is ARP_REPLY?"""
+  return arp_data["arp_opcode"] == ARP_REPLY
+
+# TODO
+@parser("eth", "ARP", "source_mac dest_mac source_ip dest_ip")
+def unpack_arp(pkt):                                            # {{{1
+  """unpack ARP packet"""
+
+  d = {}
+  if isinstance(pkt, dict): d, pkt = pkt, pkt["eth_data"]
+  htype, ptype, hlen, plen, oper = struct.unpack("!HHBBH", pkt[:8])
+                                # only ethernet + IPv4 for now -- TODO
+  if htype != ARP_HTYPE_ETH or ptype != ARP_PTYPE_IPv4: return None
+  if hlen  != ARP_HLEN_ETH  or plen  != ARP_PLEN_IPv4 : return None
+  source_mac      = struct.unpack("!BBBBBB", pkt[ 8:14])
+  dest_mac        = struct.unpack("!BBBBBB", pkt[18:24])
+  s_ip  , d_ip    = pkt[14:18], pkt[24:28]
+  s_ip_a, d_ip_a  = map(S.inet_ntoa , [s_ip       , d_ip    ])
+  s_mac , d_mac   = map(mac_to_hex  , [source_mac , dest_mac])
+  d.update(arp_source_mac = s_mac     , arp_dest_mac  = d_mac,
+           arp_source_ip  = s_ip_a    , arp_dest_ip   = d_ip_a  ,
+           arp_htype      = htype     , arp_ptype     = ptype   ,
+           arp_hlen       = hlen      , arp_plen      = plen    ,
+           arp_opcode     = oper                                )
+  return d
+                                                                # }}}1
+
+@identifier("eth", "ARP")
+def is_arp(eth_data):
+  """is ARP packet?"""
+  return eth_data is not None and eth_data["eth_type"] == ETH_ARP
+
 # === Layer 2 Ethernet Frame ====================================== #
 #                       MAC destination (6o)                        #
 #                          MAC source (6o)                          #
@@ -559,16 +656,28 @@ def unpack_eth(data):                                           # {{{1
   else:
     q_tag       = None
     payload     = data[14:]
-  f = lambda x, y: x << 8 | y
-  d_mac, s_mac  = [ b2s(binascii.hexlify(i2b(reduce(f, x, 0))))
-                    for x in [dest_mac, source_mac] ]
+  d_mac, s_mac  = map(mac_to_hex, [dest_mac, source_mac])
   return dict(eth_dest_mac  = d_mac   , eth_source_mac  = s_mac,
               eth_type      = eth_type, eth_q_tag       = q_tag,
               eth_data      = payload)
                                                                 # }}}1
 
+def mac_to_hex(mac):
+  """MAC address as hex string"""
+  f = lambda x, y: x << 8 | y
+  return b2s(binascii.hexlify(i2b(reduce(f, mac, 0), 6)))
+
+ETH_ARP               = 0x0806
+ETH_IPv4              = 0x0800
+ETH_IPv6              = 0x86DD
 ETH_QTAG              = 0x8100
-ETH_IP                = 0x0800
+
+ARP_HTYPE_ETH         = 0x0001
+ARP_PTYPE_IPv4        = ETH_IPv4
+ARP_HLEN_ETH          = 0x06
+ARP_PLEN_IPv4         = 0x04
+ARP_REQUEST           = 0x0001
+ARP_REPLY             = 0x0002
 
 ICMP_ECHOREPLY        = dict(icmp_TYPE = 0, icmp_CODE = 0)
 ICMP_ECHO             = dict(icmp_TYPE = 8, icmp_CODE = 0)
